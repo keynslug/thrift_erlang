@@ -150,24 +150,20 @@ handle_reply(Client = #tclient{protocol = Proto0,
              Function,
              ReplyType) ->
     {struct, _, ExceptionFields} = get_function_info(Service, Function, exceptions),
-    ReplyStructDef = {struct, struct, [{0, undefined, ReplyType, undefined, undefined}] ++ ExceptionFields},
-    %% io:format("reply struct: ~p~n", [ReplyStructDef]),
+    ReplyTag = '$reply',
+    ReplyStructDef = {struct, union,
+      [{0, optional, ReplyType, ReplyTag, undefined}] ++ ExceptionFields
+    },
     {Proto1, {ok, Reply}} = thrift_protocol:read(Proto0, ReplyStructDef),
-    %% io:format("reply: ~p~n", [Reply]),
     {Proto2, ok} = thrift_protocol:read(Proto1, message_end),
     NewClient = Client#tclient{protocol = Proto2},
-    ReplyList = tuple_to_list(Reply),
-    true = length(ReplyList) == length(ExceptionFields) + 1,
-    ExceptionVals = tl(ReplyList),
-    Thrown = [X || X <- ExceptionVals,
-                   X =/= undefined],
-    case Thrown of
-        [] when ReplyType == {struct, struct, []} ->
+    case Reply of
+        undefined when ReplyType == {struct, struct, []} ->
             {NewClient, {ok, ok}};
-        [] ->
-            {NewClient, {ok, hd(ReplyList)}};
-        [Exception] ->
-            throw({NewClient, {exception, Exception}})
+        {ReplyTag, ReplyVal} ->
+            {NewClient, {ok, ReplyVal}};
+        {_ExceptionTag, ExceptionVal} ->
+            throw({NewClient, {exception, ExceptionVal}})
     end.
 
 handle_application_exception(Client = #tclient{protocol = Proto0}) ->

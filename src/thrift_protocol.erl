@@ -21,6 +21,7 @@
 
 -export([new/2,
          write/2,
+         write/3,
          read/2,
          read/3,
          skip/2,
@@ -375,6 +376,14 @@ skip_list_loop(Proto0, Map = #protocol_list_begin{etype = Etype, size = Size}) -
 %%
 %% Description:
 %%--------------------------------------------------------------------
+-spec write(#protocol{}, any(), StructName :: atom() | list()) -> {#protocol{}, ok | {error, _Reason}}.
+
+write(Proto, TypeData, StructName) ->
+    case validate(TypeData, output) of
+        ok -> write_frag(Proto, TypeData, StructName);
+        Error -> {Proto, Error}
+    end.
+
 -spec write(#protocol{}, any()) -> {#protocol{}, ok | {error, _Reason}}.
 
 write(Proto, TypeData) ->
@@ -391,7 +400,7 @@ write_frag(Proto0, {{struct, union, StructDef}, {Name, Value}}, StructName)
     {Proto3, ok};
 
 write_frag(Proto0, {{struct, _, StructDef}, Data}, StructName)
-  when is_list(StructDef), is_tuple(Data), length(StructDef) == size(Data) - 1 ->
+  when is_list(StructDef), is_tuple(Data), length(StructDef) == tuple_size(Data) - 1 ->
     [_ | Elems] = tuple_to_list(Data),
     {Proto1, ok} = write_frag(Proto0, #protocol_struct_begin{name = StructName}),
     {Proto2, ok} = struct_write_loop(Proto1, StructDef, Elems),
@@ -399,13 +408,9 @@ write_frag(Proto0, {{struct, _, StructDef}, Data}, StructName)
     {Proto3, ok}.
 
 %% thrift client specific stuff
-write_frag(Proto0, {{struct, _, StructDef}, Data})
+write_frag(Proto0, {{struct, _, StructDef}, Data} = TypeData)
   when is_list(StructDef), is_tuple(Data), length(StructDef) == size(Data) - 1 ->
-    [StructName | Elems] = tuple_to_list(Data),
-    {Proto1, ok} = write_frag(Proto0, #protocol_struct_begin{name = StructName}),
-    {Proto2, ok} = struct_write_loop(Proto1, StructDef, Elems),
-    {Proto3, ok} = write_frag(Proto2, struct_end),
-    {Proto3, ok};
+    write_frag(Proto0, TypeData, element(1, Data));
 
 write_frag(Proto, {{struct, _, {Module, StructureName}}, Data})
   when is_atom(Module),
@@ -524,7 +529,7 @@ validate(TypeData, Direction) ->
     end.
 
 validate(TypeData, Direction, Path) ->
-    validate(required, TypeData, Direction, Path).
+    validate({optional, required}, TypeData, Direction, Path).
 
 validate(optional, {_Type, undefined}, _Direction, _Path) ->
     ok;

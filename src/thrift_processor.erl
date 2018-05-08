@@ -131,18 +131,18 @@ handle_success(State = #thrift_processor{service = Service},
                Result,
                Seqid) ->
     ReplyType  = get_function_info(Service, Function, reply_type),
-    StructName = atom_to_list(Function) ++ "_result",
 
     case Result of
         {reply, ReplyData} ->
             Reply = {
-                {struct, struct, [{0, undefined, ReplyType, undefined, undefined}]},
-                {StructName, ReplyData}
+                {struct, union, [{0, required, ReplyType, reply, undefined}]},
+                {reply, ReplyData}
             },
             send_reply(State, Function, ?tMessageType_REPLY, Reply, Seqid);
 
         ok when ReplyType == {struct, struct, []} ->
-            send_reply(State, Function, ?tMessageType_REPLY, {ReplyType, {StructName}}, Seqid);
+            %% dummy as a reply value
+            send_reply(State, Function, ?tMessageType_REPLY, {ReplyType, {Function}}, Seqid);
 
         ok when ReplyType == oneway_void ->
             %% no reply for oneway void
@@ -154,30 +154,23 @@ handle_exception(State = #thrift_processor{service = Service},
                  Exception,
                  Seqid) ->
     ExceptionType = element(1, Exception),
+
     %% Fetch a structure like {struct, [{-2, {struct, {Module, Type}}},
     %%                                  {-3, {struct, {Module, Type}}}]}
+    {struct, _, ExceptionsDef} = get_function_info(Service, Function, exceptions),
 
-    ReplySpec = get_function_info(Service, Function, exceptions),
-    {struct, _, XInfo} = ReplySpec,
+    %% Assuming we had an exception, we'd get: [{ExceptionName, Exception}]
+    ExceptionsList = [{Name, Exception}
+                       || {_, _, {struct, exception, {Module, Type}}, Name, _} <- ExceptionsDef,
+                         Module:record_name(Type) == ExceptionType],
 
-    true = is_list(XInfo),
-
-    %% Assuming we had a type1 exception, we'd get: [undefined, Exception, undefined]
-    %% e.g.: [{-1, type0}, {-2, type1}, {-3, type2}]
-    ExceptionList = [case Module:record_name(Type) of
-                         ExceptionType -> Exception;
-                         _ -> undefined
-                     end
-                     || {_Fid, _, {struct, exception, {Module, Type}}, _, _} <- XInfo],
-
-    ExceptionTuple = list_to_tuple([Function | ExceptionList]),
-
-                                                % Make sure we got at least one defined
-    case lists:all(fun(X) -> X =:= undefined end, ExceptionList) of
-        true ->
-            handle_unknown_exception(State, Function, Exception, Seqid);
-        false ->
-            send_reply(State, Function, ?tMessageType_REPLY, {ReplySpec, ExceptionTuple}, Seqid)
+    % Make sure we got at least one defined
+    case ExceptionsList of
+        [ExceptionVal | _] ->
+            ReplySpec = {struct, union, ExceptionsDef},
+            send_reply(State, Function, ?tMessageType_REPLY, {ReplySpec, ExceptionVal}, Seqid);
+        [] ->
+            handle_unknown_exception(State, Function, Exception, Seqid)
     end.
 
 %%
@@ -208,11 +201,13 @@ handle_error(State, Function, Error, Seqid) ->
 
 send_reply(State = #thrift_processor{protocol = Proto0}, Function, ReplyMessageType, Reply, Seqid) ->
     try
+        FunctionName = atom_to_list(Function),
+        StructName = FunctionName ++ "_result",
         {Proto1, ok} = thrift_protocol:write(Proto0, #protocol_message_begin{
-                                               name = atom_to_list(Function),
+                                               name = FunctionName,
                                                type = ReplyMessageType,
                                                seqid = Seqid}),
-        {Proto2, ok} = thrift_protocol:write(Proto1, Reply),
+        {Proto2, ok} = thrift_protocol:write(Proto1, Reply, StructName),
         {Proto3, ok} = thrift_protocol:write(Proto2, message_end),
         {Proto4, ok} = thrift_protocol:flush_transport(Proto3),
         {State#thrift_processor{protocol = Proto4}, ok}

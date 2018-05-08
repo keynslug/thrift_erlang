@@ -37,7 +37,7 @@ start_multiplexed_server_test() ->
     ?assertMatch({_, {error, {no_function, _}}}, thrift_client:call(CalculatorClient0, getTemperature, [])),
     ?assertMatch({_, {error, {no_function, _}}}, thrift_client:call(WeatherReportClient0, add, [41, 1])),
 
-    % ?assertMatch({_, {ok, 42}}, thrift_client:call(CalculatorClient0, add, [41, 1])),
+    ?assertMatch({_, {ok, 42}}, thrift_client:call(CalculatorClient0, add, [41, 1])),
     ?assertMatch({_, {ok, 42.0}}, thrift_client:call(WeatherReportClient0, getTemperature, [])),
 
     thrift_socket_server:stop(Pid).
